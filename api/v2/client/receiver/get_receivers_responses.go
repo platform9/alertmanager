@@ -55,7 +55,8 @@ func NewGetReceiversOK() *GetReceiversOK {
 	return &GetReceiversOK{}
 }
 
-/*GetReceiversOK handles this case with default header values.
+/*
+GetReceiversOK handles this case with default header values.
 
 Get receivers response
 */

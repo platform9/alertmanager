@@ -67,7 +67,8 @@ func NewGetAlertsOK() *GetAlertsOK {
 	return &GetAlertsOK{}
 }
 
-/*GetAlertsOK handles this case with default header values.
+/*
+GetAlertsOK handles this case with default header values.
 
 Get alerts response
 */
@@ -98,7 +99,8 @@ func NewGetAlertsBadRequest() *GetAlertsBadRequest {
 	return &GetAlertsBadRequest{}
 }
 
-/*GetAlertsBadRequest handles this case with default header values.
+/*
+GetAlertsBadRequest handles this case with default header values.
 
 Bad request
 */
@@ -129,7 +131,8 @@ func NewGetAlertsInternalServerError() *GetAlertsInternalServerError {
 	return &GetAlertsInternalServerError{}
 }
 
-/*GetAlertsInternalServerError handles this case with default header values.
+/*
+GetAlertsInternalServerError handles this case with default header values.
 
 Internal server error
 */

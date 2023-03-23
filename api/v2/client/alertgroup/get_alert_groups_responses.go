@@ -67,7 +67,8 @@ func NewGetAlertGroupsOK() *GetAlertGroupsOK {
 	return &GetAlertGroupsOK{}
 }
 
-/*GetAlertGroupsOK handles this case with default header values.
+/*
+GetAlertGroupsOK handles this case with default header values.
 
 Get alert groups response
 */
@@ -98,7 +99,8 @@ func NewGetAlertGroupsBadRequest() *GetAlertGroupsBadRequest {
 	return &GetAlertGroupsBadRequest{}
 }
 
-/*GetAlertGroupsBadRequest handles this case with default header values.
+/*
+GetAlertGroupsBadRequest handles this case with default header values.
 
 Bad request
 */
@@ -129,7 +131,8 @@ func NewGetAlertGroupsInternalServerError() *GetAlertGroupsInternalServerError {
 	return &GetAlertGroupsInternalServerError{}
 }
 
-/*GetAlertGroupsInternalServerError handles this case with default header values.
+/*
+GetAlertGroupsInternalServerError handles this case with default header values.
 
 Internal server error
 */

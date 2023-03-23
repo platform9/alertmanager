@@ -67,7 +67,8 @@ func NewGetSilenceOK() *GetSilenceOK {
 	return &GetSilenceOK{}
 }
 
-/*GetSilenceOK handles this case with default header values.
+/*
+GetSilenceOK handles this case with default header values.
 
 Get silence response
 */
@@ -100,7 +101,8 @@ func NewGetSilenceNotFound() *GetSilenceNotFound {
 	return &GetSilenceNotFound{}
 }
 
-/*GetSilenceNotFound handles this case with default header values.
+/*
+GetSilenceNotFound handles this case with default header values.
 
 A silence with the specified ID was not found
 */
@@ -121,7 +123,8 @@ func NewGetSilenceInternalServerError() *GetSilenceInternalServerError {
 	return &GetSilenceInternalServerError{}
 }
 
-/*GetSilenceInternalServerError handles this case with default header values.
+/*
+GetSilenceInternalServerError handles this case with default header values.
 
 Internal server error
 */
