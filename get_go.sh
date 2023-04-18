@@ -14,5 +14,5 @@ curl -LO "https://golang.org/dl/go$GO_VERSION.$OS-$ARCH.tar.gz"
 # Extract the Go binary to $HOME/go
 rm -rf go
 mkdir go
-sudo tar -C ./go -xzf go$GO_VERSION.$OS-$ARCH.tar.gz
+tar -C ./go -xzf go$GO_VERSION.$OS-$ARCH.tar.gz
 popd || exit
