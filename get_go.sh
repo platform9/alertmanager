@@ -10,5 +10,7 @@ ARCH=amd64
 
 # Download the Go binary
 pushd $HOME || exit
-echo $PATH
+curl -sL -o ~/.local/bin/gimme https://raw.githubusercontent.com/travis-ci/gimme/master/gimme
+chmod +x ~/.local/bin/gimme
 popd || exit
+eval "$(gimme 1.17)"

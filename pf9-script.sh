@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-export GOROOT="$HOME/go"
+eval "$(gimme 1.17)"
 export PATH="$PATH:$HOME/go/bin"
 make build || exit
 make pf9-image || exit
