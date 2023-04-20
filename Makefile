@@ -12,7 +12,16 @@
 # limitations under the License.
 
 # Needs to be defined before including Makefile.common to auto-generate targets
-DOCKER_ARCHS ?= amd64 armv7 arm64 ppc64le s390x
+#DOCKER_ARCHS ?= amd64 armv7 arm64 ppc64le s390x
+DOCKER_ARCHS ?= amd64
+
+BUILDDIR=$(CURDIR)
+registry_url ?= docker.io
+image_name = ${registry_url}/platform9/alertmanager
+DOCKERFILE?=$(CURDIR)/Dockerfile
+UPSTREAM_VERSION?=$(shell cat ./VERSION)
+image_tag = $(UPSTREAM_VERSION)-pmk-$(TEAMCITY_BUILD_ID)
+PF9_TAG="$(image_name):${image_tag}"
 
 include Makefile.common
 
@@ -54,3 +63,16 @@ clean:
 	- @rm -rf asset/assets_vfsdata.go \
                   api/v2/models api/v2/restapi api/v2/client
 	- @cd $(FRONTEND_DIR) && $(MAKE) clean
+
+pf9-image:
+	docker build -t "$(PF9_TAG)" \
+    		-f $(DOCKERFILE_PATH) \
+    		--build-arg ARCH="amd64" \
+    		--build-arg OS="linux" \
+    		$(DOCKERBUILD_CONTEXT)
+
+pf9-push:
+	echo $(PF9_TAG) > $(BUILDDIR)/container-tag
+	docker login
+	docker push $(PF9_TAG)\
+	&& docker rmi $(PF9_TAG)
