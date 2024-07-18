@@ -22,6 +22,17 @@ is not well-formed, the changes will not be applied and an error is logged.
 A configuration reload is triggered by sending a `SIGHUP` to the process or
 sending an HTTP POST request to the `/-/reload` endpoint.
 
+## Limits
+
+Alertmanager supports a number of configurable limits via command-line flags.
+
+To limit the maximum number of silences, including expired ones,
+use the `--silences.max-silences` flag.
+You can limit the maximum size of individual silences with `--silences.max-per-silence-bytes`,
+where the unit is in bytes.
+
+Both limits are disabled by default.
+
 ## Configuration file introduction
 
 To specify which configuration file to load, use the `--config.file` flag.
@@ -83,6 +94,8 @@ global:
   # The default SMTP TLS requirement.
   # Note that Go does not support unencrypted connections to remote SMTP endpoints.
   [ smtp_require_tls: <bool> | default = true ]
+  # The default TLS configuration for SMTP receivers
+  [ smtp_tls_config: <tls_config> ]
 
   # The API URL to use for Slack notifications.
   [ slack_api_url: <secret> ]
@@ -151,6 +164,8 @@ If an alert does not match any children of a node (no matching child nodes, or
 none exist), the alert is handled based on the configuration parameters of the
 current node.
 
+See [Alertmanager concepts](https://prometheus.io/docs/alerting/alertmanager/#grouping) for more information on grouping.
+
 ```yaml
 [ receiver: <string> ]
 # The labels by which incoming alerts are grouped together. For example,
@@ -185,19 +200,22 @@ matchers:
 # How long to initially wait to send a notification for a group
 # of alerts. Allows to wait for an inhibiting alert to arrive or collect
 # more initial alerts for the same group. (Usually ~0s to few minutes.)
+# If omitted, child routes inherit the group_wait of the parent route.
 [ group_wait: <duration> | default = 30s ]
 
 # How long to wait before sending a notification about new alerts that
 # are added to a group of alerts for which an initial notification has
-# already been sent. (Usually ~5m or more.)
+# already been sent. (Usually ~5m or more.) If omitted, child routes
+# inherit the group_interval of the parent route.
 [ group_interval: <duration> | default = 5m ]
 
 # How long to wait before sending a notification again if it has already
-# been sent successfully for an alert. (Usually ~3h or more).
+# been sent successfully for an alert. (Usually ~3h or more). If omitted,
+# child routes inherit the repeat_interval of the parent route.
 # Note that this parameter is implicitly bound by Alertmanager's
 # `--data.retention` configuration flag. Notifications will be resent after either
 # repeat_interval or the data retention period have passed, whichever
-# occurs first.
+# occurs first. `repeat_interval` should be a multiple of `group_interval`.
 [ repeat_interval: <duration> | default = 4h ]
 
 # Times when the route should be muted. These must match the name of a
@@ -361,6 +379,8 @@ Inhibition allows muting a set of alerts based on the presence of another set of
 alerts. This allows establishing dependencies between systems or services such that
 only the most relevant of a set of interconnected alerts are sent out during an outage.
 
+See [Alertmanager concepts](https://prometheus.io/docs/alerting/alertmanager/#inhibition) for more information on inhibition.
+
 ### `<inhibit_rule>`
 
 An inhibition rule mutes an alert (target) matching a set of matchers
@@ -414,27 +434,154 @@ source_matchers:
 
 ## Label matchers
 
-Label matchers are used both in routes and inhibition rules to match certain alerts.
+Label matchers match alerts to routes, silences, and inhibition rules.
+
+**Important**: Prometheus is adding support for UTF-8 in labels and metrics. In order to also support UTF-8 in the Alertmanager, Alertmanager versions 0.27 and later have a new parser for matchers that has a number of backwards incompatible changes. While most matchers will be forward-compatible, some will not. Alertmanager is operating a transition period where it supports both UTF-8 and classic matchers, and has provided a number of tools to help you prepare for the transition.
+
+If this is a new Alertmanager installation, we recommend enabling UTF-8 strict mode before creating an Alertmanager configuration file. You can find instructions on how to enable UTF-8 strict mode [here](#utf-8-strict-mode).
+
+If this is an existing Alertmanager installation, we recommend running the Alertmanager in the default mode called fallback mode before enabling UTF-8 strict mode. In this mode, Alertmanager will log a warning if you need to make any changes to your configuration file before UTF-8 strict mode can be enabled. Alertmanager will make UTF-8 strict mode the default in the next two versions, so it's important to transition as soon as possible.
+
+Irrespective of whether an Alertmanager installation is a new or existing installation, you can also use `amtool` to validate that an Alertmanager configuration file is compatible with UTF-8 strict mode before enabling it in Alertmanager server. You do not need a running Alertmanager server to do this. You can find instructions on how to validate an Alertmanager configuration file using `amtool` [here](#verification).
+
+### Alertmanager server operational modes
+
+During the transition period, Alertmanager supports three modes of operation. These are known as fallback mode, UTF-8 strict mode and classic mode. Fallback mode is the default mode.
+
+Operators of Alertmanager servers should transition to UTF-8 strict mode before the end of the transition period. Alertmanager will make UTF-8 strict mode the default in the next two versions, so it's important to transition as soon as possible.
+
+#### Fallback mode
+
+Alertmanager runs in a special mode called fallback mode as its default mode. As operators, you should not experience any difference in how your routes, silences or inhibition rules work.
+
+In fallback mode, configurations are first parsed as UTF-8 matchers, and if incompatible with the UTF-8 parser, are then parsed as classic matchers. If your Alertmanager configuration contains matchers that are incompatible with the UTF-8 parser, Alertmanager will parse them as classic matchers and log a warning. This warning also includes a suggestion on how to change the matchers from classic matchers to UTF-8 matchers. For example:
+
+```
+ts=2024-02-11T10:00:00Z caller=parse.go:176 level=warn msg="Alertmanager is moving to a new parser for labels and matchers, and this input is incompatible. Alertmanager has instead parsed the input using the classic matchers parser as a fallback. To make this input compatible with the UTF-8 matchers parser please make sure all regular expressions and values are double-quoted. If you are still seeing this message please open an issue." input="foo=" origin=config err="end of input: expected label value" suggestion="foo=\"\""
+```
+
+Here the matcher `foo=` can be made into a valid UTF-8 matcher by double quoting the right hand side of the expression to give `foo=""`. These two matchers are equivalent, however with UTF-8 matchers the right hand side of the matcher is a required field.
+
+In rare cases, a configuration can cause disagreement between the UTF-8 and classic parser. This happens when a matcher is valid in both parsers, but due to added support for UTF-8, results in different parsings depending on which parser is used. If your Alertmanager configuration has disagreement, Alertmanager will use the classic parser and log a warning. For example:
+
+```
+ts=2024-02-11T10:00:00Z caller=parse.go:183 level=warn msg="Matchers input has disagreement" input="qux=\"\\xf0\\x9f\\x99\\x82\"\n" origin=config
+```
+
+Any occurrences of disagreement should be looked at on a case by case basis as depending on the nature of the disagreement, the configuration might not need updating before enabling UTF-8 strict mode. For example `\xf0\x9f\x99\x82` is the byte sequence for the 🙂 emoji. If the intention is to match a literal 🙂 emoji then no change is required. However, if the intention is to match the literal `\xf0\x9f\x99\x82` then the matcher should be changed to `qux="\\xf0\\x9f\\x99\\x82"`.
+
+#### UTF-8 strict mode
+
+In UTF-8 strict mode, Alertmanager disables support for classic matchers:
+
+```
+alertmanager --config.file=config.yml --enable-feature="utf8-strict-mode"
+```
+
+This mode should be enabled for new Alertmanager installations, and existing Alertmanager installations once all warnings of incompatible matchers have been resolved. Alertmanager will not start in UTF-8 strict mode until all the warnings of incompatible matchers have been resolved:
+
+```
+ts=2024-02-11T10:00:00Z caller=coordinator.go:118 level=error component=configuration msg="Loading configuration file failed" file=config.yml err="end of input: expected label value"
+```
+
+UTF-8 strict mode will be the default mode of Alertmanager at the end of the transition period.
+
+#### Classic mode
+
+Classic mode is equivalent to Alertmanager versions 0.26.0 and older:
+
+```
+alertmanager --config.file=config.yml --enable-feature="classic-mode"
+```
+
+You can use this mode if you suspect there is an issue with fallback mode or UTF-8 strict mode. In such cases, please open an issue on GitHub with as much information as possible.
+
+### Verification
+
+You can use `amtool` to validate that an Alertmanager configuration file is compatible with UTF-8 strict mode before enabling it in Alertmanager server. You do not need a running Alertmanager server to do this.
+
+Just like Alertmanager server, `amtool` will log a warning if the configuration is incompatible or contains disagreement:
+
+```
+amtool check-config config.yml
+Checking 'config.yml'
+level=warn msg="Alertmanager is moving to a new parser for labels and matchers, and this input is incompatible. Alertmanager has instead parsed the input using the classic matchers parser as a fallback. To make this input compatible with the UTF-8 matchers parser please make sure all regular expressions and values are double-quoted. If you are still seeing this message please open an issue." input="foo=" origin=config err="end of input: expected label value" suggestion="foo=\"\""
+level=warn msg="Matchers input has disagreement" input="qux=\"\\xf0\\x9f\\x99\\x82\"\n" origin=config
+  SUCCESS
+Found:
+ - global config
+ - route
+ - 2 inhibit rules
+ - 2 receivers
+ - 0 templates
+```
+
+You will know if a configuration is compatible with UTF-8 strict mode when no warnings are logged in `amtool`:
+
+```
+amtool check-config config.yml
+Checking 'config.yml'  SUCCESS
+Found:
+ - global config
+ - route
+ - 2 inhibit rules
+ - 2 receivers
+ - 0 templates
+```
+
+You can also use `amtool` in UTF-8 strict mode as an additional level of verification. You will know that a configuration is invalid because the command will fail:
+
+```
+amtool check-config config.yml --enable-feature="utf8-strict-mode"
+level=warn msg="UTF-8 mode enabled"
+Checking 'config.yml'  FAILED: end of input: expected label value
+
+amtool: error: failed to validate 1 file(s)
+```
+
+You will know that a configuration is valid because the command will succeed:
+
+```
+amtool check-config config.yml --enable-feature="utf8-strict-mode"
+level=warn msg="UTF-8 mode enabled"
+Checking 'config.yml'  SUCCESS
+Found:
+ - global config
+ - route
+ - 2 inhibit rules
+ - 2 receivers
+ - 0 templates
+```
 
 ### `<matcher>`
 
-A matcher is a string with a syntax inspired by PromQL and OpenMetrics. The syntax of a matcher consists of three tokens:
+#### UTF-8 matchers
+
+A UTF-8 matcher consists of three tokens:
+
+- An unquoted literal or a double-quoted string for the label name.
+- One of `=`, `!=`, `=~`, or `!~`. `=` means equals, `!=` means not equal, `=~` means matches the regular expression and `!~` means doesn't match the regular expression.
+- An unquoted literal or a double-quoted string for the regular expression or label value.
+
+Unquoted literals can contain all UTF-8 characters other than the reserved characters. These are whitespace, and all characters in ``` { } ! = ~ , \ " ' ` ```. For example, `foo`, `[a-zA-Z]+`, and `Προμηθεύς` (Prometheus in Greek) are all examples of valid unquoted literals. However, `foo!` is not a valid literal as `!` is a reserved character.
+
+Double-quoted strings can contain all UTF-8 characters. Unlike unquoted literals, there are no reserved characters. You can even use UTF-8 code points. For example, `"foo!"`, `"bar,baz"`, `"\"baz qux\""` and `"\xf0\x9f\x99\x82"` are valid double-quoted strings.
+
+#### Classic matchers
+
+A classic matcher is a string with a syntax inspired by PromQL and OpenMetrics. The syntax of a classic matcher consists of three tokens:
 
 - A valid Prometheus label name.
-
-- One of  `=`, `!=`, `=~`, or `!~`. `=` means equals, `!=` means that the strings are not equal, `=~` is used for equality of regex expressions and `!~` is used for un-equality of regex expressions. They have the same meaning as known from PromQL selectors.
-
+- One of `=`, `!=`, `=~`, or `!~`. `=` means equals, `!=` means that the strings are not equal, `=~` is used for equality of regex expressions and `!~` is used for un-equality of regex expressions. They have the same meaning as known from PromQL selectors.
 - A UTF-8 string, which may be enclosed in double quotes. Before or after each token, there may be any amount of whitespace.
 
 The 3rd token may be the empty string. Within the 3rd token, OpenMetrics escaping rules apply: `\"` for a double-quote, `\n` for a line feed, `\\` for a literal backslash. Unescaped `"` must not occur inside the 3rd token (only as the 1st or last character). However, literal line feed characters are tolerated, as are single `\` characters not followed by `\`, `n`, or `"`. They act as a literal backslash in that case.
 
-Matchers are ANDed together, meaning that all matchers must evaluate to "true" when tested against the labels on a given alert. For example, an alert with these labels:
+#### Composition of matchers
 
-```json
-{"alertname":"Watchdog","severity":"none"}
-```
+You can compose matchers to create complex match expressions. When composed, all matchers must match for the entire expression to match. For example, the expression `{alertname="Watchdog", severity=~"warning|critical"}` will match an alert with labels `alertname=Watchdog, severity=critical` but not an alert with labels `alertname=Watchdog, severity=none` as while the alertname is Watchdog the severity is neither warning nor critical.
 
-would NOT match this list of matchers:
+You can compose matchers into expressions with a YAML list:
 
 ```yaml
 matchers:
@@ -442,37 +589,86 @@ matchers:
   - severity =~ "warning|critical"
 ```
 
-In the configuration, multiple matchers are combined in a YAML list. However, it is also possible to combine multiple matchers within a single YAML string, again using syntax inspired by PromQL. In such a string, a leading `{` and/or a trailing `}` is optional and will be trimmed before further parsing. Individual matchers are separated by commas outside of quoted parts of the string. Those commas may be surrounded by whitespace. Parts of the string inside unescaped double quotes `"…"` are considered quoted (and commas don't act as separators there). If double quotes are escaped with a single backslash `\`, they are ignored for the purpose of identifying quoted parts of the input string. If the input string, after trimming the optional trailing `}`, ends with a comma, followed by optional whitespace, this comma and whitespace will be trimmed.
+or as a PromQL inspired expression where each matcher is comma separated:
 
-Here are some examples of valid string matchers:
+```
+{alertname="Watchdog", severity=~"warning|critical"}
+```
 
-1. Shown below are two equality matchers combined in a long form YAML list.
+A single trailing comma is permitted:
+
+```
+{alertname="Watchdog", severity=~"warning|critical",}
+```
+
+The open `{` and close `}` brace are optional:
+
+```
+alertname="Watchdog", severity=~"warning|critical"
+```
+
+However, both must be either present or omitted. You cannot have incomplete open or close braces:
+
+```
+{alertname="Watchdog", severity=~"warning|critical"
+```
+
+```
+alertname="Watchdog", severity=~"warning|critical"}
+```
+
+You cannot have duplicate open or close braces either:
+
+```
+{{alertname="Watchdog", severity=~"warning|critical",}}
+```
+
+Whitespace (spaces, tabs and newlines) is permitted outside double quotes and has no effect on the matchers themselves. For example:
+
+```
+{
+   alertname = "Watchdog",
+   severity =~ "warning|critical",
+}
+```
+
+is equivalent to:
+
+```
+{alertname="Watchdog",severity=~"warning|critical"}
+```
+
+#### More examples
+
+Here are some more examples:
+
+1. Two equals matchers composed as a YAML list:
 
     ```yaml
     matchers:
       - foo = bar
-      - dings !=bums
+      - dings != bums
     ```
 
-2. Similar to example 1, shown below are two equality matchers combined in a short form YAML list.
+2. Two matchers combined composed as a short-form YAML list:
 
     ```yaml
     matchers: [ foo = bar, dings != bums ]
     ```
 
-    As shown below, in the short-form, it's generally better to quote the list elements to avoid problems with special characters like commas:
+   As shown below, in the short-form, it's better to use double quotes to avoid problems with special characters like commas:
+
+   ```yaml
+   matchers: [ "foo = \"bar,baz\"", "dings != bums" ]
+   ```
+
+3. You can also put both matchers into one PromQL-like string. Single quotes work best here:
 
     ```yaml
-    matchers: [ "foo = bar,baz", "dings != bums" ]
+    matchers: [ '{foo="bar", dings!="bums"}' ]
     ```
 
-3. You can also put both matchers into one PromQL-like string. Single quotes for the whole string work best here.
-
-    ```yaml
-    matchers: [ '{foo="bar",dings!="bums"}' ]
-    ```
-
-4. To avoid any confusion about YAML string quoting and escaping, you can use YAML block quoting and then only worry about the OpenMetrics escaping inside the block. A complex example with a regular expression and different quotes inside the label value is shown below:
+4. To avoid issues with escaping and quoting rules in YAML, you can also use a YAML block:
 
     ```yaml
     matchers:
@@ -499,6 +695,8 @@ discord_configs:
   [ - <discord_config>, ... ]
 email_configs:
   [ - <email_config>, ... ]
+msteams_configs:
+  [ - <msteams_config>, ... ]
 opsgenie_configs:
   [ - <opsgenie_config>, ... ]
 pagerduty_configs:
@@ -557,6 +755,15 @@ oauth2:
 
 # Optional proxy URL.
 [ proxy_url: <string> ]
+# Comma-separated string that can contain IPs, CIDR notation, domain names
+# that should be excluded from proxying. IP and domain names can
+# contain port numbers.
+[ no_proxy: <string> ]
+# Use proxy URL indicated by environment variables (HTTP_PROXY, http_proxy, HTTPS_PROXY, https_proxy, NO_PROXY, and no_proxy)
+[ proxy_from_environment: <boolean> | default: false ]
+# Specifies headers to send to proxies during CONNECT requests.
+[ proxy_connect_header:
+  [ <string>: [<secret>, ...] ] ]
 
 # Configure whether HTTP requests follow HTTP 3xx redirects.
 [ follow_redirects: <bool> | default = true ]
@@ -597,6 +804,15 @@ tls_config:
 
 # Optional proxy URL.
 [ proxy_url: <string> ]
+# Comma-separated string that can contain IPs, CIDR notation, domain names
+# that should be excluded from proxying. IP and domain names can
+# contain port numbers.
+[ no_proxy: <string> ]
+# Use proxy URL indicated by environment variables (HTTP_PROXY, https_proxy, HTTPs_PROXY, https_proxy, and no_proxy)
+[ proxy_from_environment: <boolean> | default: false ]
+# Specifies headers to send to proxies during CONNECT requests.
+[ proxy_connect_header:
+  [ <string>: [<secret>, ...] ] ]
 ```
 
 #### `<tls_config>`
@@ -643,7 +859,9 @@ Discord notifications are sent via the [Discord webhook API](https://discord.com
 [ send_resolved: <boolean> | default = true ]
 
 # The Discord webhook URL.
+# webhook_url and webhook_url_file are mutually exclusive.
 webhook_url: <secret>
+webhook_url_file: <filepath>
 
 # Message title template.
 [ title: <tmpl_string> | default = '{{ template "discord.default.title" . }}' ]
@@ -662,6 +880,7 @@ webhook_url: <secret>
 [ send_resolved: <boolean> | default = false ]
 
 # The email address to send notifications to.
+# Allows a comma separated list of rfc5322 compliant email addresses.
 to: <tmpl_string>
 
 # The sender's address.
@@ -687,7 +906,7 @@ to: <tmpl_string>
 
 # TLS configuration.
 tls_config:
-  [ <tls_config> ]
+  [ <tls_config> | default = global.smtp_tls_config ]
 
 # The HTML body of the email notification.
 [ html: <tmpl_string> | default = '{{ template "email.default.html" . }}' ]
@@ -697,6 +916,32 @@ tls_config:
 # Further headers email header key/value pairs. Overrides any headers
 # previously set by the notification implementation.
 [ headers: { <string>: <tmpl_string>, ... } ]
+```
+
+### `<msteams_config>`
+
+Microsoft Teams notifications are sent via the [Incoming Webhooks](https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/what-are-webhooks-and-connectors) API endpoint.
+
+```yaml
+# Whether to notify about resolved alerts.
+[ send_resolved: <boolean> | default = true ]
+
+# The incoming webhook URL.
+# webhook_url and webhook_url_file are mutually exclusive.
+[ webhook_url: <secret> ]
+[ webhook_url_file: <filepath> ]
+
+# Message title template.
+[ title: <tmpl_string> | default = '{{ template "msteams.default.title" . }}' ]
+
+# Message summary template.
+[ summary: <tmpl_string> | default = '{{ template "msteams.default.summary" . }}' ]
+
+# Message body template.
+[ text: <tmpl_string> | default = '{{ template "msteams.default.text" . }}' ]
+
+# The HTTP client's configuration.
+[ http_config: <http_config> | default = global.http_config ]
 ```
 
 ### `<opsgenie_config>`
@@ -765,7 +1010,11 @@ responders:
 [ name: <tmpl_string> ]
 [ username: <tmpl_string> ]
 
-# "team", "teams", "user", "escalation" or "schedule".
+# One of `team`, `teams`, `user`, `escalation` or `schedule`.
+#
+# The `teams` responder is configured using the `name` field above.
+# This field can contain a comma-separated list of team names.
+# If the list is empty, no responders are configured.
 type: <tmpl_string>
 ```
 
@@ -845,7 +1094,7 @@ The fields are documented in the [PagerDuty API documentation](https://developer
 
 ```yaml
 href: <tmpl_string>
-source: <tmpl_string>
+src: <tmpl_string>
 alt: <tmpl_string>
 ```
 
@@ -887,6 +1136,12 @@ token_file: <filepath>
 # A supplementary URL shown alongside the message.
 [ url: <tmpl_string> | default = '{{ template "pushover.default.url" . }}' ]
 
+# Optional device to send notification to, see https://pushover.net/api#device
+[ device: <string> ]
+
+# Optional sound to use for notification, see https://pushover.net/api#sound
+[ sound: <string> ]
+
 # Priority, see https://pushover.net/api#priority
 [ priority: <tmpl_string> | default = '{{ if eq .Status "firing" }}2{{ else }}0{{ end }}' ]
 
@@ -898,15 +1153,22 @@ token_file: <filepath>
 # acknowledges the notification.
 [ expire: <duration> | default = 1h ]
 
+# Optional time to live (TTL) to use for notification, see https://pushover.net/api#ttl
+[ ttl: <duration> ]
+
 # The HTTP client's configuration.
 [ http_config: <http_config> | default = global.http_config ]
 ```
 
 ### `<slack_config>`
 
-Slack notifications are sent via [Slack
-webhooks](https://api.slack.com/messaging/webhooks). The notification contains
-an [attachment](https://api.slack.com/messaging/composing/layouts#attachments).
+Slack notifications can be sent via [Incoming webhooks](https://api.slack.com/messaging/webhooks) or [Bot tokens](https://api.slack.com/authentication/token-types).
+
+If using an incoming webhook then `api_url` must be set to the URL of the incoming webhook, or written to the file referenced in `api_url_file`.
+
+If using Bot tokens then `api_url` must be set to [`https://slack.com/api/chat.postMessage`](https://api.slack.com/methods/chat.postMessage), the bot token must be set as the authorization credentials in `http_config`, and `channel` must contain either the name of the channel or Channel ID to send notifications to. If using the name of the channel the # is optional.
+
+The notification contains an [attachment](https://api.slack.com/messaging/composing/layouts#attachments).
 
 ```yaml
 # Whether to notify about resolved alerts.
@@ -1054,11 +1316,17 @@ attributes:
 # If not specified, default API URL will be used.
 [ api_url: <string> | default = global.telegram_api_url ]
 
-# Telegram bot token.
+# Telegram bot token. It is mutually exclusive with `bot_token_file`.
 [ bot_token: <secret> ]
+
+# Read the Telegram bot token from a file. It is mutually exclusive with `bot_token`.
+[ bot_token_file: <filepath> ]
 
 # ID of the chat where to send the messages.
 [ chat_id: <int> ]
+
+# Optional ID of the message thread where to send the messages.
+[ message_thread_id: <int> ]
 
 # Message template.
 [ message: <tmpl_string> default = '{{ template "telegram.default.message" .}}' ]
@@ -1206,11 +1474,11 @@ API](http://admin.wechat.com/wiki/index.php?title=Customer_Service_Messages).
 [ api_url: <string> | default = global.webex_api_url ]
 
 # ID of the Webex Teams room where to send the messages.
-room_id: <string>
+room_id: <tmpl_string>
 
 # Message template.
 [ message: <tmpl_string> default = '{{ template "webex.default.message" .}}' ]
 
-# The HTTP client's configuration. You must use this configuration to supply the bot token as part of the HTTP `Authorization` header. 
+# The HTTP client's configuration. You must use this configuration to supply the bot token as part of the HTTP `Authorization` header.
 [ http_config: <http_config> | default = global.http_config ]
 ```

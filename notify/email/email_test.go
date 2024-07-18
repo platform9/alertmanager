@@ -300,7 +300,7 @@ func TestEmailNotifyWithErrors(t *testing.T) {
 			_, retry, err := notifyEmail(emailCfg, c.Server)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.errMsg)
-			require.Equal(t, false, retry)
+			require.False(t, retry)
 
 			e, err := c.Server.getLastEmail()
 			require.NoError(t, err)
@@ -407,7 +407,7 @@ func TestEmailNotifyWithSTARTTLS(t *testing.T) {
 			Text:       "Text body",
 			RequireTLS: &trueVar,
 			// MailDev embeds a self-signed certificate which can't be retrieved.
-			TLSConfig: commoncfg.TLSConfig{InsecureSkipVerify: true},
+			TLSConfig: &commoncfg.TLSConfig{InsecureSkipVerify: true},
 		},
 		c.Server,
 	)
@@ -610,7 +610,7 @@ func TestEmailConfigNoAuthMechs(t *testing.T) {
 	}
 	_, err := email.auth("")
 	require.Error(t, err)
-	require.Equal(t, err.Error(), "unknown auth mechanism: ")
+	require.Equal(t, "unknown auth mechanism: ", err.Error())
 }
 
 func TestEmailConfigMissingAuthParam(t *testing.T) {
@@ -620,19 +620,19 @@ func TestEmailConfigMissingAuthParam(t *testing.T) {
 	}
 	_, err := email.auth("CRAM-MD5")
 	require.Error(t, err)
-	require.Equal(t, err.Error(), "missing secret for CRAM-MD5 auth mechanism")
+	require.Equal(t, "missing secret for CRAM-MD5 auth mechanism", err.Error())
 
 	_, err = email.auth("PLAIN")
 	require.Error(t, err)
-	require.Equal(t, err.Error(), "missing password for PLAIN auth mechanism")
+	require.Equal(t, "missing password for PLAIN auth mechanism", err.Error())
 
 	_, err = email.auth("LOGIN")
 	require.Error(t, err)
-	require.Equal(t, err.Error(), "missing password for LOGIN auth mechanism")
+	require.Equal(t, "missing password for LOGIN auth mechanism", err.Error())
 
 	_, err = email.auth("PLAIN LOGIN")
 	require.Error(t, err)
-	require.Equal(t, err.Error(), "missing password for PLAIN auth mechanism; missing password for LOGIN auth mechanism")
+	require.Equal(t, "missing password for PLAIN auth mechanism; missing password for LOGIN auth mechanism", err.Error())
 }
 
 func TestEmailNoUsernameStillOk(t *testing.T) {

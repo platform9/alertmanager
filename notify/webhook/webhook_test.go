@@ -68,12 +68,12 @@ func TestWebhookRetry(t *testing.T) {
 					`{"status":"invalid event"}`,
 				)),
 
-				exp: fmt.Sprintf(`unexpected status code %d: %s: {"status":"invalid event"}`, http.StatusBadRequest, u.String()),
+				exp: fmt.Sprintf(`unexpected status code %d: {"status":"invalid event"}`, http.StatusBadRequest),
 			},
 			{
 				status: http.StatusBadRequest,
 
-				exp: fmt.Sprintf(`unexpected status code %d: %s`, http.StatusBadRequest, u.String()),
+				exp: fmt.Sprintf(`unexpected status code %d`, http.StatusBadRequest),
 			},
 		} {
 			t.Run("", func(t *testing.T) {
@@ -89,15 +89,15 @@ func TestWebhookTruncateAlerts(t *testing.T) {
 
 	truncatedAlerts, numTruncated := truncateAlerts(0, alerts)
 	require.Len(t, truncatedAlerts, 10)
-	require.EqualValues(t, numTruncated, 0)
+	require.EqualValues(t, 0, numTruncated)
 
 	truncatedAlerts, numTruncated = truncateAlerts(4, alerts)
 	require.Len(t, truncatedAlerts, 4)
-	require.EqualValues(t, numTruncated, 6)
+	require.EqualValues(t, 6, numTruncated)
 
 	truncatedAlerts, numTruncated = truncateAlerts(100, alerts)
 	require.Len(t, truncatedAlerts, 10)
-	require.EqualValues(t, numTruncated, 0)
+	require.EqualValues(t, 0, numTruncated)
 }
 
 func TestWebhookRedactedURL(t *testing.T) {
@@ -124,7 +124,7 @@ func TestWebhookReadingURLFromFile(t *testing.T) {
 
 	f, err := os.CreateTemp("", "webhook_url")
 	require.NoError(t, err, "creating temp file failed")
-	_, err = f.WriteString(u.String())
+	_, err = f.WriteString(u.String() + "\n")
 	require.NoError(t, err, "writing to temp file failed")
 
 	notifier, err := New(

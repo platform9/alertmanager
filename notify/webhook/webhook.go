@@ -18,9 +18,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -54,11 +54,7 @@ func New(conf *config.WebhookConfig, t *template.Template, l log.Logger, httpOpt
 		client: client,
 		// Webhooks are assumed to respond with 2xx response codes on a successful
 		// request and 5xx response codes are assumed to be recoverable.
-		retrier: &notify.Retrier{
-			CustomDetailsFunc: func(_ int, body io.Reader) string {
-				return errDetails(body, conf.URL.String())
-			},
-		},
+		retrier: &notify.Retrier{},
 	}, nil
 }
 
@@ -110,7 +106,7 @@ func (n *Notifier) Notify(ctx context.Context, alerts ...*types.Alert) (bool, er
 		if err != nil {
 			return false, fmt.Errorf("read url_file: %w", err)
 		}
-		url = string(content)
+		url = strings.TrimSpace(string(content))
 	}
 
 	resp, err := notify.PostJSON(ctx, n.client, url, &buf)
@@ -119,16 +115,9 @@ func (n *Notifier) Notify(ctx context.Context, alerts ...*types.Alert) (bool, er
 	}
 	defer notify.Drain(resp)
 
-	return n.retrier.Check(resp.StatusCode, resp.Body)
-}
-
-func errDetails(body io.Reader, url string) string {
-	if body == nil {
-		return url
-	}
-	bs, err := io.ReadAll(body)
+	shouldRetry, err := n.retrier.Check(resp.StatusCode, resp.Body)
 	if err != nil {
-		return url
+		return shouldRetry, notify.NewErrorWithReason(notify.GetFailureReasonFromStatusCode(resp.StatusCode), err)
 	}
-	return fmt.Sprintf("%s: %s", url, string(bs))
+	return shouldRetry, err
 }
